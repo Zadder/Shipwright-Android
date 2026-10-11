@@ -31,6 +31,7 @@ class SohInputEditorWindow final : public Ship::GuiWindow {
     void DrawAnalogPreview(const char* label, ImVec2 stick, float deadzone = 0, bool gyro = false);
     void DrawControllerSchema();
     bool TestingRumble();
+    void OpenManualJumpMenu();
 
   protected:
     void InitElement() override;
@@ -97,6 +98,7 @@ class SohInputEditorWindow final : public Ship::GuiWindow {
     std::set<N64ButtonMask> mModifierButtonsBitmasks;
     std::set<N64ButtonMask> mCustomOcarinaButtonsBitmasks;
     bool mInputEditorPopupOpen;
+    bool mOpenManualJumpMenu = false;
     void DrawSetDefaultsButton(uint8_t portIndex);
     void DrawClearAllButton(uint8_t portIndex);
 

@@ -4150,4 +4150,13 @@ typedef enum {
     // - none
     VB_EMPTY_BOTTLE_OI,
 
+    // Whether a normal running-off-a-ledge forward jump is triggered.
+    // Default: true. args: Player*, PlayState*. Does not govern special water dives.
+    VB_PLAYER_AUTO_LEDGE_JUMP,
+
+    // Try a grounded manual jump after ordinary action handlers decline.
+    // Default: false. args: Player*, PlayState*, Input*.
+    // A handler returns true only after changing the player to the vanilla jump action.
+    VB_PLAYER_TRY_MANUAL_JUMP,
+
 } GIVanillaBehavior;

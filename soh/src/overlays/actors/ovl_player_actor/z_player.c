@@ -6,6 +6,7 @@
 
 #include <libultraship/libultra.h>
 #include "global.h"
+#include "soh/Enhancements/ManualJump/ManualJump.h"
 
 #include "overlays/actors/ovl_Bg_Heavy_Block/z_bg_heavy_block.h"
 #include "overlays/actors/ovl_Door_Shutter/z_door_shutter.h"
@@ -4225,6 +4226,10 @@ s32 Player_TryActionHandlerList(PlayState* play, Player* this, s8* actionHandler
                 return true;
             }
         }
+        if (updateUpperBody && !sUpperBodyIsBusy &&
+            GameInteractor_Should(VB_PLAYER_TRY_MANUAL_JUMP, false, this, play, sControlInput)) {
+            return true;
+        }
     }
 
     return false;
@@ -4976,6 +4981,15 @@ s32 Player_ActionHandler_12(Player* this, PlayState* play) {
             sp3C = 1;
         }
 
+        // Gate only movement-triggered short step-ups. Keep explicit A climbing,
+        // tall climbs, water exits and the native eligibility checks above.
+        if (sp3C && (this->ledgeClimbType <= 3) && (this->yDistToLedge < this->ageProperties->unk_14) &&
+            !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) &&
+            !CHECK_BTN_ALL(sControlInput->press.button, BTN_A) &&
+            !ManualJump_ShouldTraverseObstacle(this, play, sControlInput)) {
+            sp3C = 0;
+        }
+
         if (sp3C != 0) {
             Player_SetupAction(play, this, Player_Action_80845668, 0);
 
@@ -5024,7 +5038,7 @@ s32 Player_ActionHandler_12(Player* this, PlayState* play) {
             return 1;
         }
     } else if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (this->ledgeClimbType == 1) &&
-               (this->ledgeClimbDelayTimer >= 3)) {
+               (this->ledgeClimbDelayTimer >= 3) && ManualJump_ShouldTraverseObstacle(this, play, sControlInput)) {
         temp = (this->yDistToLedge * 0.08f) + 5.5f;
         func_808389E8(this, &gPlayerAnim_link_normal_jump, temp, play);
         this->linearVelocity = 2.5f;
@@ -5846,8 +5860,10 @@ void func_8083AA10(Player* this, PlayState* play) {
                         }
                     }
 
-                    func_8083A4A8(this, play);
-                    return;
+                    if (GameInteractor_Should(VB_PLAYER_AUTO_LEDGE_JUMP, true, this, play)) {
+                        func_8083A4A8(this, play);
+                        return;
+                    }
                 }
 
                 if ((sPrevFloorProperty == FLOOR_PROPERTY_9) || (sYDistToFloor <= this->ageProperties->unk_34) ||

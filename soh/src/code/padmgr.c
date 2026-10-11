@@ -288,8 +288,9 @@ void PadMgr_ProcessInputs(PadMgr* padMgr) {
         }
 
         buttonDiff = input->prev.button ^ input->cur.button;
-        input->press.button |= (u16)(buttonDiff & input->cur.button);
-        input->rel.button |= (u16)(buttonDiff & input->prev.button);
+        // Preserve enhancement actions above the original 16 N64 button bits.
+        input->press.button |= (CONTROLLERBUTTONS_T)(buttonDiff & input->cur.button);
+        input->rel.button |= (CONTROLLERBUTTONS_T)(buttonDiff & input->prev.button);
         PadUtils_UpdateRelXY(input);
         input->press.stick_x += (s8)(input->cur.stick_x - input->prev.stick_x);
         input->press.stick_y += (s8)(input->cur.stick_y - input->prev.stick_y);

@@ -1562,9 +1562,15 @@ void SohInputEditorWindow::DrawDeviceToggles(uint8_t portIndex) {
     }
 }
 
+void SohInputEditorWindow::OpenManualJumpMenu() {
+    mOpenManualJumpMenu = true;
+    Show();
+}
+
 void SohInputEditorWindow::DrawLinkTab() {
     uint8_t portIndex = 0;
-    if (ImGui::BeginTabItem(StringHelper::Sprintf("Link (P1)###port%d", portIndex).c_str())) {
+    if (ImGui::BeginTabItem(StringHelper::Sprintf("Link (P1)###port%d", portIndex).c_str(), nullptr,
+                           mOpenManualJumpMenu ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None)) {
         DrawClearAllButton(portIndex);
         DrawSetDefaultsButton(portIndex);
         DrawDeviceToggles(portIndex);
@@ -1575,6 +1581,27 @@ void SohInputEditorWindow::DrawLinkTab() {
         ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.133f, 0.133f, 0.133f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+        if (mOpenManualJumpMenu) {
+            ImGui::SetNextItemOpen(true);
+        }
+        if (ImGui::CollapsingHeader("Manual Jump")) {
+            CVarCheckbox("Enable Manual Jump", CVAR_ENHANCEMENT("ManualJump"),
+                         CheckboxOptions().Tooltip("Use the Jump binding for grounded jumps. Unchecked restores the "
+                                                   "game's default automatic ledge jumps."));
+            DrawButtonLine("Jump", portIndex, BTN_CUSTOM_JUMP);
+            static std::vector<const char*> vaultModes = { "Automatic", "Manual" };
+            CVarCombobox("Vaulting Mode", CVAR_ENHANCEMENT("ManualJumpVaultMode"), vaultModes,
+                         UIWidgets::ComboboxOptions().DefaultIndex(1).Tooltip(
+                             "Automatic keeps native vaults and short step-ups. Manual requires Jump while moving "
+                             "into these obstacles, with a 180 ms buffer. Tall climbs and A-button climbing remain "
+                             "unchanged. Manual Jump must be enabled."));
+            ImGui::TextWrapped("Bind a button or key with +. Unchecked uses default jump behavior; your binding is saved.");
+        }
+        if (mOpenManualJumpMenu) {
+            ImGui::SetScrollY(0.0f);
+            mOpenManualJumpMenu = false;
+        }
 
         if (ImGui::CollapsingHeader("Buttons", NULL, ImGuiTreeNodeFlags_DefaultOpen)) {
             DrawButtonLine("A", portIndex, BTN_A, CHIP_COLOR_N64_BLUE);

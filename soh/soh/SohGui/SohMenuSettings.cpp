@@ -6,6 +6,7 @@
 #include <soh/GameVersions.h>
 #include "soh/ResourceManagerHelpers.h"
 #include "UIWidgets.hpp"
+#include "soh/Enhancements/controls/SohInputEditorWindow.h"
 #include <ship/controller/controldeck/ControlDeck.h>
 #include <ship/Context.h>
 #include <algorithm>
@@ -570,6 +571,20 @@ void SohMenu::AddMenuSettings() {
     path.sidebarName = "Controls";
     path.column = SECTION_COLUMN_1;
     AddSidebarEntry("Settings", "Controls", 2);
+    AddWidget(path, "Manual Jump", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_ENHANCEMENT("ManualJump"))
+        .RaceDisable(false)
+        .Options(CheckboxOptions().Tooltip("Enable grounded jumps with your Jump binding. Unchecked restores default "
+                                          "automatic ledge jumps. Configure the button in Manual Jump Bindings."));
+    AddWidget(path, "Manual Jump Bindings", WIDGET_BUTTON)
+        .Callback([](WidgetInfo& info) {
+            auto window = std::dynamic_pointer_cast<SohInputEditorWindow>(
+                Ship::Context::GetRawInstance()->GetWindow()->GetGui()->GetGuiWindow("Configure Controller"));
+            if (window != nullptr) {
+                window->OpenManualJumpMenu();
+            }
+        })
+        .Options(ButtonOptions().Size(Sizes::Inline));
     AddWidget(path, "Clear Devices", WIDGET_BUTTON)
         .Callback([](WidgetInfo& info) {
             SohGui::mModalWindow->RegisterPopup(

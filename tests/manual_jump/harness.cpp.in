@@ -1,0 +1,328 @@
+// Test doubles for engine services. Production functions are injected by run.py.
+#include <assert.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+using s8 = int8_t;
+using s16 = int16_t;
+using s32 = int32_t;
+using u16 = uint16_t;
+using f32 = float;
+#define CONTROLLERBUTTONS_T uint32_t
+#define BTN_Z 0x2000
+#define BTN_R 0x0010
+#define CHECK_BTN_ALL(value, mask) (((value) & (mask)) == (mask))
+#define CHECK_BTN_ANY(value, mask) ((value) & (mask))
+#define ABS(value) ((value) < 0 ? -(value) : (value))
+#define CVAR_ENHANCEMENT(name) "gEnhancements." name
+#define CS_STATE_IDLE 0
+#define NA_SE_VO_LI_AUTO_JUMP 1
+#define UNK6AE_ROT_FOCUS_X 1
+#define UNK6AE_ROT_UPPER_X 2
+@CONSTANTS@
+struct Vec3f { float x = 0, y = 0, z = 0; };
+struct CollisionPoly { struct { int x = 0, z = 0; } normal; };
+struct WaterBox {};
+struct LinkAnimationHeader {};
+struct PlayState;
+struct Player;
+using PlayerActionFunc = void (*)(Player*, PlayState*);
+struct Input { struct Pad { uint32_t button = 0; } press, cur, prev, rel; };
+struct Actor {
+    struct { Vec3f pos; } world;
+    struct { struct { s16 y = 0; } rot; float yOffset = 0; } shape;
+    Vec3f prevPos, velocity;
+    uint32_t bgCheckFlags = 1;
+    Actor* parent = nullptr;
+    s16 wallYaw = -32768;
+    int wallBgId = 0;
+    float yDistToWater = 0;
+    CollisionPoly* wallPoly = nullptr;
+};
+struct Player {
+    Actor actor;
+    PlayerActionFunc actionFunc = nullptr;
+    s32 (*upperActionFunc)(Player*, PlayState*) = nullptr;
+    uint32_t stateFlags1 = 0, stateFlags2 = 0, stateFlags3 = 0;
+    float linearVelocity = 0;
+    s16 yaw = 0, fallStartHeight = 0, fallDistance = 0;
+    int meleeWeaponState = 0, itemAction = 0, heldItemAction = 0, unk_6AD = 0;
+    int hoverBootsTimer = 0, floorSfxOffset = 0, prevFloorSfxOffset = 0, unk_6AE_rotFlags = 0;
+    struct { int actionVar2 = 0; } av2;
+    struct { int movementFlags = 0; } skelAnime;
+    int ledgeClimbType = 0, ledgeClimbDelayTimer = 0, currentBoots = 0, modelAnimType = 0;
+    float yDistToLedge = 20, distToInteractWall = 0;
+    struct Age { float unk_34 = 20, unk_14 = 80, unk_10 = 60, unk_18 = 50, unk_08 = 1; } age;
+    Age* ageProperties = &age;
+};
+struct PlayState {
+    Player* player;
+    struct { int state = 0; } csCtx, pauseCtx;
+    int colCtx = 0;
+};
+#define GET_PLAYER(play) ((play)->player)
+struct { int health = 48; } gSaveContext;
+enum { VB_PLAYER_TRY_MANUAL_JUMP, VB_PLAYER_AUTO_LEDGE_JUMP, VB_SET_STATIC_PREV_FLOOR_TYPE,
+       VB_PLAYER_LIMIT_DIVE_XZ_SPEED };
+using Hook = void (*)(bool*, va_list);
+static Hook hooks[4] = {};
+static int enabled = 1, vaultMode = 0;
+static uint32_t ticks = 1000;
+static uint32_t SDL_GetTicks() { return ticks; }
+static int CVarGetInteger(const char* name, int fallback) {
+    return strcmp(name, "gEnhancements.ManualJumpVaultMode") == 0 ? (vaultMode < 0 ? fallback : vaultMode) : enabled;
+}
+#define COND_VB_SHOULD(id, condition, body) \
+    hooks[id] = nullptr; \
+    if (condition) { hooks[id] = [](bool* should, va_list args) { body; }; }
+struct RegisterShipInitFunc {
+    RegisterShipInitFunc(void (*fn)(), const char* const (&)[2]) { fn(); }
+};
+static bool GameInteractor_Should(int id, uint32_t initial, ...) {
+    bool result = initial;
+    va_list args;
+    va_start(args, initial);
+    if (hooks[id]) hooks[id](&result, args);
+    va_end(args);
+    return result;
+}
+static bool targeting = false, blockingCs = false, upperBusy = false, handlerTaken = false;
+static bool catchLedge = false, waterDive = false;
+static int ledgeChecks = 0, landingAnimations = 0;
+extern "C" {
+int ManualJump_ShouldTraverseObstacle(Player*, PlayState*, Input*);
+void Player_Action_Idle(Player*, PlayState*) {}
+void Player_Action_80842180(Player*, PlayState*) {}
+void Player_Action_8084411C(Player*, PlayState*) {}
+void Player_Action_80844A44(Player*, PlayState*) {}
+void Player_Action_8084E604(Player*, PlayState*) {}
+void Player_Action_80845668(Player*, PlayState*) {}
+void SpecialAction(Player*, PlayState*) {}
+s32 Player_UpperAction_ChangeHeldItem(Player*, PlayState*) { return 0; }
+int Player_IsZTargeting(Player*) { return targeting; }
+s32 Player_InBlockingCsMode(PlayState*, Player*) { return blockingCs; }
+static void Player_SetupAction(PlayState*, Player* p, PlayerActionFunc action, int) {
+    p->actionFunc = action; p->av2.actionVar2 = 0;
+}
+static void Player_AnimPlayOnceAdjusted(PlayState*, Player*, LinkAnimationHeader*) {}
+static void Player_PlayJumpingSfx(Player*) {}
+static void Player_PlayVoiceSfx(Player*, u16) {}
+static s32 Player_UpdateUpperBody(Player*, PlayState*) { return upperBusy; }
+static s32 func_8008F128(Player*) { return 0; }
+static s32 Handler(Player*, PlayState*) { return handlerTaken; }
+static s32 (*sActionHandlerFuncs[])(Player*, PlayState*) = { Handler, Handler };
+static s32 sUpperBodyIsBusy;
+static Input* sControlInput;
+static float sWaterSpeedFactor = 1;
+static int regs[100];
+#define IREG(i) regs[i]
+static LinkAnimationHeader gPlayerAnim_link_normal_run_jump, gPlayerAnim_link_normal_jump;
+static LinkAnimationHeader gPlayerAnim_link_normal_run_jump_water_fall, gPlayerAnim_link_normal_landing_wait;
+static int sPrevFloorProperty = 0;
+static float sYDistToFloor = 100;
+static Vec3f D_8085451C;
+static int sTouchedWallFlags = 0;
+#define BGCHECK_SCENE 0
+#define WALL_FLAG_GRABBABLE 1
+#define PLAYER_LEDGE_CLIMB_2 2
+#define PLAYER_BOOTS_IRON 1
+#define BTN_A 0x8000
+#define COLPOLY_GET_NORMAL(n) (float(n))
+static LinkAnimationHeader gPlayerAnim_link_normal_250jump_start, gPlayerAnim_link_normal_150step_up;
+static LinkAnimationHeader gPlayerAnim_link_normal_100step_up, gPlayerAnim_link_swimer_swim_15step_up;
+static int func_808332B8(Player*) { return 0; }
+static void func_80832224(Player*) {}
+static void LinkAnimation_PlayOnceSetSpeed(PlayState*, decltype(Player::skelAnime)*, LinkAnimationHeader*, float) {}
+static void AnimationContext_DisableQueue(PlayState*) {}
+static int func_80838FB8(PlayState*, Player*) { return 0; }
+static void Math_Vec3f_Copy(Vec3f* to, Vec3f* from) { *to = *from; }
+static void Player_ZeroSpeedXZ(Player* p) { p->linearVelocity = 0; }
+static void func_80832440(PlayState*, Player*) {}
+static float func_808396F4(PlayState*, Player*, Vec3f*, Vec3f*, CollisionPoly**, s32*) { return 0; }
+static bool WaterBox_GetSurface1(PlayState*, int*, float, float, float* height, WaterBox**) {
+    *height = 100; return waterDive;
+}
+static int func_8083A6AC(Player* p, PlayState*) {
+    ++ledgeChecks;
+    if (catchLedge) { p->stateFlags1 |= PLAYER_STATE1_HANGING_OFF_LEDGE; p->actionFunc = SpecialAction; }
+    return catchLedge;
+}
+static void Player_AnimPlayLoop(PlayState*, Player*, LinkAnimationHeader*) { ++landingAnimations; }
+void func_808389E8(Player*, LinkAnimationHeader*, float, PlayState*);
+@FUNCTIONS@
+void func_808389E8(Player* p, LinkAnimationHeader* anim, float y, PlayState* play) {
+    func_80838940(p, anim, y, play, 0);
+}
+}
+@MODULE@
+static Player p;
+static PlayState play;
+static Input inputState;
+static void Reset() {
+    p = Player{}; p.ageProperties = &p.age; p.actionFunc = Player_Action_Idle;
+    play = PlayState{}; play.player = &p;
+    inputState = Input{}; inputState.press.button = BTN_CUSTOM_JUMP;
+    sControlInput = &inputState;
+    gSaveContext.health = 48;
+    targeting = blockingCs = upperBusy = handlerTaken = catchLedge = waterDive = false;
+    ledgeChecks = landingAnimations = 0;
+    sPrevFloorProperty = 0; sYDistToFloor = 100;
+    // Normal boot register values from sBootData, z_player_lib.c.
+    regs[66] = 590; regs[67] = 750; regs[68] = 125; regs[69] = 200;
+    enabled = 1; vaultMode = 0; ticks = 1000; RegisterManualJump();
+}
+static bool TryJump() {
+    // One negative entry is a complete vanilla action-handler list.
+    s8 lastHandler[] = { -1 };
+    return Player_TryActionHandlerList(&play, &p, lastHandler, true);
+}
+static void InputEdges(Input* input) {
+    const uint32_t buttonDiff = input->prev.button ^ input->cur.button;
+    @EDGES@
+}
+static void LowObstacle(int delay = 3) {
+    p.actionFunc = Player_Action_80842180;
+    p.ledgeClimbType = 1; p.ledgeClimbDelayTimer = delay;
+    p.actor.bgCheckFlags |= BGCHECKFLAG_PLAYER_WALL_INTERACT;
+    p.linearVelocity = 5;
+    p.yaw = 0; p.actor.wallYaw = -32768;
+}
+int main() {
+    // An unset vault mode defaults to Manual, while explicit Automatic is respected.
+    Reset(); LowObstacle(); vaultMode = -1; inputState.press.button = 0;
+    assert(!Player_ActionHandler_12(&p, &play));
+    inputState.press.button = BTN_CUSTOM_JUMP;
+    assert(TryJump()); assert(p.linearVelocity == 2.5f && p.actor.velocity.y == 7.1f);
+    // Automatic and disabled modes preserve the actual vanilla vault.
+    Reset(); LowObstacle(); inputState.press.button = 0;
+    assert(Player_ActionHandler_12(&p, &play)); assert(p.linearVelocity == 2.5f);
+    assert(p.actor.velocity.y == 7.1f);
+    Reset(); LowObstacle(); vaultMode = 1; enabled = 0; inputState.press.button = 0;
+    assert(Player_ActionHandler_12(&p, &play));
+    // Manual mode suppresses movement-only vaults and uses native action/impulse on press.
+    Reset(); LowObstacle(); vaultMode = 1; inputState.press.button = 0;
+    assert(!Player_ActionHandler_12(&p, &play)); assert(!TryJump());
+    inputState.press.button = BTN_CUSTOM_JUMP;
+    assert(TryJump()); assert(p.linearVelocity == 2.5f && p.actor.velocity.y == 7.1f);
+    assert(!TryJump());
+    // A press just before the vanilla timer completes survives for 180 ms.
+    Reset(); LowObstacle(1); vaultMode = 1;
+    assert(!TryJump()); assert(p.actor.bgCheckFlags & BGCHECKFLAG_GROUND);
+    inputState.press.button = 0; ticks += 150; p.ledgeClimbDelayTimer = 3;
+    assert(TryJump()); assert(p.linearVelocity == 2.5f);
+    // Expiry resolves to an ordinary jump, not a late native vault.
+    Reset(); LowObstacle(1); vaultMode = 1; assert(!TryJump());
+    inputState.press.button = 0; ticks += 181; p.ledgeClimbDelayTimer = 3;
+    assert(TryJump()); assert(p.linearVelocity == 5 && p.actor.velocity.y >= 6);
+    // Moving away, standing still and lacking an actual wall never grant manual vault eligibility.
+    for (int invalid = 0; invalid < 4; ++invalid) {
+        Reset(); LowObstacle(); vaultMode = 1;
+        if (invalid == 0) p.linearVelocity = 0;
+        if (invalid == 1) p.yaw = -32768;
+        if (invalid == 2) p.actor.bgCheckFlags &= ~BGCHECKFLAG_PLAYER_WALL_INTERACT;
+        if (invalid == 3) targeting = true;
+        assert(!Player_ActionHandler_12(&p, &play));
+    }
+    // Native short fence step-ups require Jump in Manual, for both native sizes.
+    CollisionPoly wall;
+    for (int type = 2; type <= 3; ++type) {
+        Reset(); LowObstacle(6); vaultMode = 1; p.ledgeClimbType = type;
+        p.actor.wallPoly = &wall; p.yDistToLedge = 40; inputState.press.button = 0;
+        assert(!Player_ActionHandler_12(&p, &play)); assert(!TryJump());
+        inputState.press.button = BTN_CUSTOM_JUMP;
+        assert(TryJump()); assert(p.actionFunc == Player_Action_80845668);
+        assert(p.stateFlags1 & PLAYER_STATE1_CLIMBING_LEDGE);
+        assert(p.actor.world.pos.y == 40 && p.linearVelocity == 5);
+        Reset(); LowObstacle(6); p.ledgeClimbType = type; p.actor.wallPoly = &wall;
+        inputState.press.button = 0; assert(Player_ActionHandler_12(&p, &play)); // Automatic
+        Reset(); LowObstacle(6); vaultMode = 1; enabled = 0;
+        p.ledgeClimbType = type; p.actor.wallPoly = &wall; inputState.press.button = 0;
+        assert(Player_ActionHandler_12(&p, &play)); // Disabled fallback
+    }
+    // Explicit A climbing and tall native climbing remain unchanged in Manual.
+    Reset(); vaultMode = 1; p.ledgeClimbType = 2; p.actor.wallPoly = &wall;
+    inputState.press.button = BTN_A; assert(Player_ActionHandler_12(&p, &play));
+    Reset(); vaultMode = 1; p.ledgeClimbType = 4; p.ledgeClimbDelayTimer = 6;
+    p.yDistToLedge = 90; inputState.press.button = 0;
+    assert(Player_ActionHandler_12(&p, &play)); assert(p.actionFunc == Player_Action_80845668);
+    // A Jump pressed shortly before the native step-up timer completes is buffered.
+    Reset(); LowObstacle(4); vaultMode = 1; p.ledgeClimbType = 3;
+    p.actor.wallPoly = &wall; p.yDistToLedge = 40; assert(!TryJump());
+    ticks += 150; p.ledgeClimbDelayTimer = 6; inputState.press.button = 0;
+    assert(TryJump()); assert(p.actionFunc == Player_Action_80845668);
+    // Swimming exits bypass the short-step gate, even without a Jump press.
+    Reset(); vaultMode = 1; p.ledgeClimbType = 2; p.ledgeClimbDelayTimer = 6;
+    p.actor.wallPoly = &wall; p.stateFlags1 = PLAYER_STATE1_IN_WATER;
+    inputState.press.button = 0; assert(Player_ActionHandler_12(&p, &play));
+    // A normal floor/wall with no native low-obstacle classification falls back to normal Jump.
+    Reset(); vaultMode = 1; p.linearVelocity = 5; assert(TryJump()); assert(p.linearVelocity == 5);
+    // Leaving the obstacle cancels a pending press; held input cannot jump later.
+    Reset(); LowObstacle(1); vaultMode = 1; assert(!TryJump());
+    p.ledgeClimbType = 0; inputState.press.button = 0; assert(!TryJump());
+    LowObstacle(); assert(!TryJump());
+    Reset(); LowObstacle(1); vaultMode = 1; ticks = 0xFFFFFFC0u; assert(!TryJump());
+    inputState.press.button = 0; ticks += 150; p.ledgeClimbDelayTimer = 3;
+    assert(TryJump()); // monotonic clock wraparound
+    Reset(); LowObstacle(1); vaultMode = 1; assert(!TryJump());
+    play.pauseCtx.state = 1; inputState.press.button = 0; assert(!TryJump());
+    play.pauseCtx.state = 0; LowObstacle(); assert(!TryJump());
+    Reset(); LowObstacle(1); vaultMode = 1; assert(!TryJump());
+    inputState.press.button = 0; enabled = 0; LowObstacle(); assert(Player_ActionHandler_12(&p, &play));
+    p.actionFunc = Player_Action_80842180; p.actor.bgCheckFlags |= BGCHECKFLAG_GROUND;
+    enabled = 1; assert(!Player_ActionHandler_12(&p, &play));
+    const float speeds[] = { 0.0f, 1.0f, 3.0f, 6.0f };
+    for (float speed : speeds) {
+        Reset(); p.actionFunc = speed ? Player_Action_80842180 : Player_Action_Idle;
+        p.linearVelocity = speed; p.yaw = p.actor.shape.rot.y = 1234;
+        assert(TryJump());
+        assert(p.linearVelocity == speed && p.yaw == 1234 && p.actor.shape.rot.y == 1234);
+        assert(p.actor.velocity.y >= 6.0f && p.actionFunc == Player_Action_8084411C);
+        assert(!(p.actor.bgCheckFlags & 1));
+        assert(!TryJump()); // no double jumping, even with the press still present
+    }
+    Reset(); inputState.press.button = 0; inputState.cur.button = BTN_CUSTOM_JUMP; assert(!TryJump());
+    Reset(); enabled = 0; RegisterManualJump(); assert(!TryJump());
+    Reset(); p.actionFunc = SpecialAction; assert(!TryJump());
+    Reset(); targeting = true; assert(!TryJump());
+    Reset(); blockingCs = true; assert(!TryJump());
+    Reset(); play.csCtx.state = 1; assert(!TryJump());
+    Reset(); play.pauseCtx.state = 1; assert(!TryJump());
+    Reset(); p.av2.actionVar2 = 5; assert(!TryJump());
+    Reset(); p.itemAction = 1; assert(!TryJump());
+    Reset(); p.meleeWeaponState = 1; assert(!TryJump());
+    Reset(); p.actor.bgCheckFlags = 0; assert(!TryJump());
+    Reset(); gSaveContext.health = 0; assert(!TryJump());
+    Reset(); upperBusy = true; assert(!TryJump());
+    Reset(); handlerTaken = true; assert(TryJump()); assert(p.actionFunc == Player_Action_Idle);
+    const uint32_t excluded[] = { PLAYER_STATE1_IN_WATER, PLAYER_STATE1_HANGING_OFF_LEDGE,
+        PLAYER_STATE1_CLIMBING_LEDGE, PLAYER_STATE1_CLIMBING_LADDER, PLAYER_STATE1_CARRYING_ACTOR,
+        PLAYER_STATE1_TALKING, PLAYER_STATE1_DAMAGED, PLAYER_STATE1_INPUT_DISABLED,
+        PLAYER_STATE1_ON_HORSE, PLAYER_STATE1_IN_CUTSCENE, PLAYER_STATE1_GETTING_ITEM };
+    for (auto state : excluded) { Reset(); p.stateFlags1 = state; assert(!TryJump()); }
+    const uint32_t excluded2[] = { PLAYER_STATE2_CRAWLING, PLAYER_STATE2_DIVING, PLAYER_STATE2_HOPPING,
+        PLAYER_STATE2_FROZEN, PLAYER_STATE2_GRABBED_BY_ENEMY, PLAYER_STATE2_OCARINA_PLAYING };
+    for (auto state : excluded2) { Reset(); p.stateFlags2 = state; assert(!TryJump()); }
+    for (int mode = 0; mode < 2; ++mode) {
+        for (int grab = 0; grab < 2; ++grab) {
+            Reset(); enabled = mode; RegisterManualJump(); catchLedge = grab;
+            p.actor.bgCheckFlags = 4; p.linearVelocity = 6;
+            func_8083AA10(&p, &play);
+            assert((p.actor.velocity.y > 0) == !mode);
+            assert(ledgeChecks == mode);
+            assert(bool(p.stateFlags1 & PLAYER_STATE1_HANGING_OFF_LEDGE) == bool(mode && grab));
+            assert(landingAnimations == (mode && !grab));
+        }
+    }
+    Reset(); p.actor.bgCheckFlags = 4; p.linearVelocity = 6;
+    sPrevFloorProperty = 11; waterDive = true; func_8083AA10(&p, &play);
+    assert(p.actionFunc == Player_Action_80844A44 && p.actor.velocity.y == 6 && ledgeChecks == 0);
+    Reset(); func_8083A4A8(&p, &play); assert(p.actor.velocity.y == 1.25f); // untouched vanilla call
+    Input edge{}; edge.cur.button = BTN_CUSTOM_JUMP | 0x8000;
+    InputEdges(&edge); assert(edge.press.button == edge.cur.button);
+    edge.prev = edge.cur; edge.press.button = 0; InputEdges(&edge); assert(edge.press.button == 0);
+    edge.cur.button = 0; InputEdges(&edge); assert(edge.rel.button == (BTN_CUSTOM_JUMP | 0x8000));
+    puts("PASS: manual jump policy, stationary/moving impulses, no repeat/double jump, ledge fall/grab,");
+    puts("      disabled vanilla behavior, special water dive and 32-bit press/release edges.");
+    puts("      native vaults/short step-ups, priority, 180 ms buffer, cancellation and preserved tall/A/water climbing.");
+}

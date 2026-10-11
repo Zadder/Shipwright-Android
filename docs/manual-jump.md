@@ -45,7 +45,15 @@ the repository's existing libultraship Android patch, as its workflow specifies.
 
 ## Play the Android APK
 
-Install `ManualJump-9.3.apk` on an arm64 Android device. It is a separate local
+The latest corrected build is `ManualJump-9.3-ModFix.apk`. It also fixes a native
+scene-loading crash with Disable 2D Pre-Rendered Scenes enabled: the temporary
+time-settings resource now has metadata, avoiding a null dereference in its
+destructor. The imported save loaded with the user's Djipi/Art Plus pack and
+screenshot-derived graphics/camera settings enabled. Link's House, Kokiri Forest,
+the animated equipment pause menu and a manual jump were checked on the MI 8.
+These checks do not establish compatibility with every mod or every scene.
+
+Install `ManualJump-9.3-ModFix.apk` on an arm64 Android device. It is a separate local
 test build (`com.linkzenic.soh.localtest`), using `SOH93-Test` for game data.
 Select your own supported legally dumped ROM during setup, then open
 Settings > Controls, enable Manual Jump, and use Manual Jump Bindings to assign
